@@ -1,17 +1,18 @@
 \documentclass[conference]{IEEEtran}
 \usepackage{amsmath,booktabs,graphicx}
+
 \title{Comparing Attention-Pooled Recurrent Networks for IMDb Sentiment Classification}
 
 \author{
-\IEEEauthorblockN{Nicholas Ampimah and Jane Ohia}
-\IEEEauthorblockA{University of Nebraska--Lincoln}
+\IEEEauthorblockN{Nicholas Ampimah, Yin Po Po Aung, and Jane Ohia}
+\IEEEauthorblockA{ CSCE 879 - Introduction to Deep Learning}
 }
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We compare bidirectional gated recurrent unit (BiGRU) and long short-term memory (BiLSTM) models for binary sentiment classification of IMDb movie reviews. Both architectures use learned embeddings, masked attention pooling, and dropout regularization, with dropout rates of 0.20 and 0.50, yielding four models. A stratified validation split is used for early stopping and model selection, while the official test split remains held out. BiLSTM-A, selected by minimum validation cross-entropy, achieved 84.84\% test accuracy, 0.848 macro-F1, and 15.16\% error with a 95\% Wilson confidence interval of 14.72--15.61\%. Increasing dropout to 0.50 worsened minimum validation loss for both recurrent architectures and did not eliminate overfitting.
+We compare bidirectional gated recurrent unit (BiGRU) and long short-term memory (BiLSTM) encoders for binary sentiment classification of IMDb reviews. Both architectures use learned embeddings, masked attention pooling, and classifier dropout of 0.20 or 0.50, giving four models. A stratified split of the official training set is used for early stopping and model selection, while the official test set remains held out. BiLSTM-A, selected by minimum validation cross-entropy, achieved 84.84\% test accuracy, 0.848 macro-F1, and 15.16\% error with a 95\% Wilson confidence interval of 14.72--15.61\%. Increasing dropout from 0.20 to 0.50 worsened minimum validation loss for both recurrent architectures and did not eliminate overfitting.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -19,72 +20,114 @@ sentiment analysis, IMDb, recurrent neural networks, attention, dropout
 \end{IEEEkeywords}
 
 \section{Introduction}
-Sentiment analysis maps text to an opinion label and is naturally sequential because word order, negation, and long-range context can change meaning. We study the 50,000-review IMDb benchmark \cite{maas} using two bidirectional recurrent encoders: BiGRU and BiLSTM. Both are paired with the same masked attention and classifier head so that the recurrent cell is the main architectural difference. Within each architecture, dropout is varied from 0.20 to 0.50 to test whether stronger regularization improves generalization. BiLSTM-A achieved the lowest validation loss, 0.3027, and was therefore selected before test evaluation. It reached 84.84\% test accuracy. The four test accuracies differed by only 0.31 percentage points, and stronger dropout did not improve validation loss or prevent overfitting.
+Review sentiment depends on word order and context. Negation can reverse the meaning of a phrase, and a later clause can change the tone of an earlier one. On the IMDb sentiment benchmark \cite{maas}, we compare BiGRU and BiLSTM encoders with the same attention mechanism and classifier head. Within each architecture, only the dropout setting is changed to examine whether stronger regularization improves validation performance and reduces overfitting. BiLSTM-A was selected at validation loss 0.3027 and achieved 84.84\% test accuracy and 0.848 macro-F1. Across the four models, test accuracy varied by only 0.31 percentage points, while all four learning curves showed validation deterioration after their best checkpoint.
 
-\section{Problem, Data, and Models}
-\subsection{Learning Problem and Data}
-The input is a movie review represented by at most 200 token IDs, and the output is the probability $p_\theta(y=1\mid x)$ that the review is positive, where $y\in\{0,1\}$. A threshold of 0.5 produces the negative/positive prediction. Training minimizes binary cross-entropy,
+\section{Problem and Data}
+The input is a movie review represented by at most 200 token IDs, and the output is the probability $p_\theta(y=1\mid x)$ that the review is positive, where $y\in\{0,1\}$. A score above 0.5 predicts positive sentiment. Training minimizes binary cross-entropy,
 \begin{equation}
 \mathcal{L}=-\frac{1}{B}\sum_{i=1}^{B}
 [y_i\log p_i+(1-y_i)\log(1-p_i)].
 \end{equation}
-Cross-entropy is appropriate because the task is binary probabilistic classification and penalizes confident incorrect predictions.
+This objective is appropriate for binary probabilistic classification and penalizes confident incorrect predictions. The fixed 0.5 threshold avoids tuning a decision threshold on the test set.
 
-TensorFlow Datasets provides 25,000 training and 25,000 test reviews. Using seed 42, the official training set is stratified into 20,000 training and 5,000 validation reviews. The official test split is not used for architecture or hyperparameter selection. Text is lowercased; HTML line breaks and most punctuation are removed while apostrophes are retained. A vocabulary of at most 15,000 tokens is fitted only on the training reviews. Reviews are padded or truncated to 200 tokens to bound recurrent computation, with the limitation that late sentiment evidence can be lost.
+TensorFlow Datasets supplies 25,000 labeled training and 25,000 test reviews. Using seed 42, the official training set is divided by a stratified split into 20,000 training and 5,000 validation reviews. The official test split remains separate from architecture and hyperparameter selection. Text is lowercased; HTML line breaks and most punctuation are removed, while apostrophes are retained for contractions. The vocabulary contains at most 15,000 entries, including padding and unknown tokens, and is fitted only on the training reviews. Reviews are padded or truncated to 200 tokens to bound computation, although truncation can discard sentiment evidence appearing late in a review.
 
-\subsection{Architectures and Training}
-Each token is mapped to a 64-dimensional learned embedding. The encoder is either a bidirectional GRU or bidirectional LSTM with 48 units per direction, producing a $200\times96$ sequence of contextual states. Bidirectionality is appropriate because the complete review is available at inference and sentiment can depend on both preceding and following context.
+\section{Architectures and Training}
+A learned embedding maps each token to 64 features. The recurrent encoder is either a bidirectional GRU or bidirectional LSTM with 48 units in each direction, producing a $200\times96$ sequence of contextual states. Bidirectionality is appropriate because the full review is available at inference and sentiment can depend on both preceding and following words. GRUs use update and reset gates, while LSTMs use input, forget, and output gates together with a separate cell state.
 
-Masked attention computes
+\begin{table}[!t]
+\caption{Architecture comparison. Shapes omit the batch dimension.}
+\label{tab:architecture}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Stage & BiGRU & BiLSTM\\
+\midrule
+Token IDs & 200 & 200\\
+Embedding & $200\times64$ & $200\times64$\\
+Encoder & GRU, 48/direction & LSTM, 48/direction\\
+Encoder output & $200\times96$ & $200\times96$\\
+Pooling & Masked attention, 96 & Same\\
+Classifier & Dense 32, ReLU, dropout & Same\\
+Output & Dense 1, sigmoid & Same\\
+Parameters & 999,105 & 1,009,665\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The attention layer computes
 \begin{equation}
 s_t=v^\top\tanh(Wh_t+b), \qquad
-\alpha_t=\frac{e^{s_t}}{\sum_j e^{s_j}},
+\alpha_t=\frac{\exp(s_t)}{\sum_j\exp(s_j)},
 \end{equation}
-over nonpadding positions and returns $\sum_t\alpha_t h_t$. This allows the classifier to emphasize informative positions instead of relying only on the final recurrent state. The pooled vector passes through a 32-unit ReLU layer, dropout, and a sigmoid output. Setting A uses dropout 0.20 and setting B uses 0.50; thus four models are evaluated. Dropout is used to reduce co-adaptation and overfitting.
+over nonpadding positions and returns the weighted sum $\sum_t\alpha_t h_t$. It can therefore emphasize informative locations throughout the retained review instead of relying only on the final recurrent state. The pooled vector passes through a 32-unit ReLU layer, dropout, and a sigmoid output. Setting A uses dropout 0.20 and setting B uses 0.50. Dropout serves as the regularizer by discouraging reliance on individual classifier features.
 
-All models use Adam with learning rate $10^{-3}$ and batch size 128. Early stopping monitors validation loss with patience 5 and restores the best checkpoint. The actual run used a 300-epoch safety cap, but all models stopped after the required non-improvement window. Model selection was frozen before the official test set was scored.
+All models use Adam with learning rate $10^{-3}$ and batch size 128. Early stopping monitors validation loss with patience 5 and restores the minimum-validation-loss checkpoint. The actual run used a 300-epoch safety cap, but all models stopped after the required five-epoch non-improvement window. The winning model was fixed using validation loss before the official test set was evaluated.
 
-\begin{table*}[t]
-\caption{Validation-selected checkpoints and held-out test performance. $^\ast$ indicates the model selected by minimum validation loss. Error intervals are 95\% Wilson confidence intervals.}
+\begin{table*}[!t]
+\caption{Held-out performance. Validation loss is measured at the best checkpoint. $^\ast$Selected by validation loss. Error intervals are 95\% Wilson confidence intervals.}
 \label{tab:results}
 \centering
 \small
 \setlength{\tabcolsep}{4.2pt}
-\begin{tabular}{lccccccc}
+\begin{tabular}{lrrrrrrr}
 \toprule
-Model & Best/Stop & Dropout & Val. Loss & Accuracy (\%) & Macro-F1 & ROC AUC & Error (\%) [95\% CI] \\
+Model & Best/Stop & Val. Loss & Accuracy (\%) & Macro-F1 & ROC AUC & Error (\%) & Error CI (\%)\\
 \midrule
-BiGRU-A & 2/7 & 0.20 & 0.3040 & 85.06 & 0.850 & 0.931 & 14.94 [14.51, 15.39] \\
-BiGRU-B & 2/7 & 0.50 & 0.3055 & 85.10 & 0.851 & 0.930 & 14.90 [14.47, 15.35] \\
-BiLSTM-A$^\ast$ & 2/7 & 0.20 & \textbf{0.3027} & 84.84 & 0.848 & 0.930 & 15.16 [14.72, 15.61] \\
-BiLSTM-B & 1/6 & 0.50 & 0.3179 & 85.15 & 0.851 & 0.930 & 14.85 [14.41, 15.29] \\
+BiGRU-A & 2/7 & 0.3040 & 85.06 & 0.850 & 0.931 & 14.94 & [14.51, 15.39]\\
+BiGRU-B & 2/7 & 0.3055 & 85.10 & 0.851 & 0.930 & 14.90 & [14.47, 15.35]\\
+BiLSTM-A$^\ast$ & 2/7 & \textbf{0.3027} & 84.84 & 0.848 & 0.930 & 15.16 & [14.72, 15.61]\\
+BiLSTM-B & 1/6 & 0.3179 & 85.15 & 0.851 & 0.930 & 14.85 & [14.41, 15.29]\\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-\section{Results and Discussion}
-\subsection{Performance and Model Selection}
-Table~\ref{tab:results} compares validation loss, accuracy, macro-F1, ROC AUC, and generalization error. Accuracy measures overall correctness, macro-F1 gives equal weight to positive and negative classes, and ROC AUC evaluates ranking quality across thresholds. For $k$ errors among $n$ independent test examples, the error rate is $\hat e=k/n$; 95\% Wilson intervals quantify test-sample uncertainty in this generalization-error estimate.
+\section{Held-Out Results}
+\subsection{Metrics and Confidence Intervals}
+Accuracy summarizes correct classifications, macro-F1 gives equal weight to the two classes, and ROC AUC evaluates probability ranking across thresholds. For $k$ errors among $n$ held-out reviews, the observed generalization error is $\hat e=k/n=1-\mathrm{accuracy}$. The 95\% Wilson interval used in the analysis is
+\begin{equation}
+\frac{\hat e+z^2/(2n)\ \pm\ z
+\sqrt{\hat e(1-\hat e)/n+z^2/(4n^2)}}
+{1+z^2/n},
+\end{equation}
+where $z=1.96$. This interval quantifies test-sample uncertainty conditional on the fitted model; it does not measure retraining variability, dataset shift, or paired differences between models.
 
-BiLSTM-A was selected because its validation loss, 0.3027, was the lowest of the four models. BiLSTM-B had the highest observed test accuracy, 85.15\%, but its worse validation loss, 0.3179, cannot be used retroactively to replace the validation-selected model. This separation of validation-based selection from final testing prevents test-set leakage. The overlapping confidence intervals also show that the small observed test differences should not be interpreted as strong evidence that one model is statistically superior.
+\subsection{Model Selection}
+BiLSTM-A had the lowest validation loss (0.3027), narrowly ahead of BiGRU-A (0.3040), and was therefore selected before test evaluation. BiLSTM-B had the highest observed test accuracy (85.15\%), but its validation loss was worse (0.3179). Because architecture and hyperparameter selection are part of training, the test ranking is descriptive and cannot be used retroactively to replace the validation-selected model. The individual confidence intervals overlap substantially and do not establish statistically significant paired differences between models.
 
-\begin{figure*}[t]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=0.82\textwidth]{results/confusion_matrices.pdf}
-\caption{Row-normalized confusion matrices on the 25,000-review test set. Rows are true classes and columns are predicted classes.}
+\includegraphics[width=.92\textwidth]{results/confusion_matrices.pdf}
+\caption{Row-normalized test confusion matrices. Rows are true classes, columns are predicted classes, and diagonal entries are class recalls.}
 \label{fig:cm}
 \end{figure*}
 
-\subsection{Confusion Matrices, Dropout, and Overfitting}
-Figure~\ref{fig:cm} gives the required normalized confusion matrices. All four models classified negative reviews somewhat better than positive reviews. For BiLSTM-A, positive recall was 81.38\% and negative recall was 88.30\%, corresponding to 2,327 false negatives and 1,462 false positives.
+\subsection{Class-Specific Performance}
+Figure~\ref{fig:cm} gives the required normalized confusion matrices. False positives are negative reviews predicted positive, while false negatives are positive reviews predicted negative. Every model missed more positive reviews than negative reviews. BiLSTM-A produced 2,327 false negatives and 1,462 false positives, corresponding to 81.38\% positive recall and 88.30\% negative recall. Because the test set is balanced, overall accuracy is the average of the two class recalls.
 
-Increasing dropout from 0.20 to 0.50 changed minimum validation loss from 0.3040 to 0.3055 for BiGRU and from 0.3027 to 0.3179 for BiLSTM. Thus stronger dropout did not improve validation performance in either architecture. The training histories also show overfitting after the best checkpoint: for BiLSTM-A, training loss decreased from 0.2333 at epoch 2 to 0.0331 at epoch 7 while validation loss increased from 0.3027 to 0.6572. Early stopping was therefore important for retaining the best-generalizing weights.
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=.78\textwidth]{results/learning_curves.pdf}
+\caption{Binary cross-entropy by epoch. Vertical lines mark each model's best validation checkpoint.}
+\label{fig:curves}
+\end{figure*}
+
+\section{Dropout and Overfitting}
+The assignment requires discussion of the impact of the regularizer and of overfitting. Figure~\ref{fig:curves} provides direct evidence by comparing training and validation cross-entropy across epochs. Falling training loss accompanied by rising validation loss indicates that continued fitting improves the training objective while harming validation performance.
+
+Increasing dropout from 0.20 to 0.50 changed minimum validation loss from 0.3040 to 0.3055 for BiGRU and from 0.3027 to 0.3179 for BiLSTM, so stronger dropout did not improve validation performance in either architecture. For BiGRU, the best-epoch validation-minus-training loss gap narrowed from 0.0750 to 0.0635, yet validation loss still increased. This smaller gap alone is not sufficient evidence of improved generalization because dropout is active while training loss is measured. BiLSTM-B reached its minimum validation loss at epoch 1, so its best-epoch training--validation gap is not directly comparable with BiLSTM-A at epoch 2.
+
+All four models continued to reduce training loss after their best validation checkpoint while validation loss ultimately rose. For BiLSTM-A, training loss decreased from 0.2333 at epoch 2 to 0.0331 at epoch 7 while validation loss increased from 0.3027 to 0.6572. Thus, dropout 0.50 did not eliminate overfitting, and early stopping was important for retaining the best-generalizing checkpoint.
 
 \section{Strengths and Limitations}
-The experiment uses identical preprocessing, data partitions, attention, classifier layers, optimizer settings, and selection criteria across models, supporting a controlled comparison. The held-out test set is isolated from model selection, and normalized confusion matrices and confidence intervals provide more information than accuracy alone. Limitations include a single split and seed, different parameter counts for GRU and LSTM, possible information loss from truncating reviews to 200 tokens, and the fact that attention weights are not causal explanations. Results are specific to polarized IMDb reviews and may not transfer directly to neutral sentiment or other domains.
+The shared prediction head, identical data split, common optimizer settings, and one-factor dropout comparison support a controlled comparison. Fitting the vocabulary only on the training data and fixing the winner before test evaluation reduce leakage. Normalized confusion matrices and confidence intervals provide more information than accuracy alone.
+
+There are also limitations. The encoders have different parameter counts, so observed differences cannot be attributed solely to GRU versus LSTM gate design. Only one split and one seed were used, which limits claims about retraining variability. Truncating reviews to 200 tokens and capping the vocabulary improve computational tractability but may remove useful sentiment evidence. Attention weights indicate where the model places emphasis but do not constitute causal explanations. Finally, the conclusions apply to polarized IMDb movie reviews and do not establish performance on neutral sentiment or other domains.
 
 \section{Conclusion}
-BiLSTM-A was selected by minimum validation cross-entropy and achieved 84.84\% test accuracy, 0.848 macro-F1, and 15.16\% error with a 95\% Wilson interval of 14.72--15.61\%. Dropout 0.50 did not improve minimum validation loss for either recurrent architecture, and all models showed overfitting after their best checkpoint. Overall, masked attention with bidirectional recurrent encoders provided similar held-out performance across the four tested configurations, while validation-based selection and early stopping were essential for a defensible comparison.
+BiLSTM-A was selected by minimum validation cross-entropy and achieved 84.84\% test accuracy, 0.848 macro-F1, and 15.16\% error with a 95\% Wilson confidence interval of 14.72--15.61\%. BiGRU and BiLSTM produced very similar held-out accuracy overall. Increasing dropout to 0.50 did not improve minimum validation loss for either recurrent architecture, and all four models showed overfitting after their best checkpoint. The results therefore support validation-based model selection and early stopping as important components of this sequential sentiment-classification experiment.
 
 \begin{thebibliography}{1}
 \bibitem{maas}
