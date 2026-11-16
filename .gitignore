@@ -1,2 +1,4 @@
-"tfds_cache.zip" 
-"tfds_cache/" 
+tfds_cache.zip
+tfds_cache/
+imdb_*.out
+imdb_*.err
