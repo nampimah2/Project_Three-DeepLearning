@@ -68,7 +68,8 @@ def wilson(k, n):
 
 
 def evaluate(y, p):
-    from sklearn.metrics import confusion_matrix, f1_score, roc_auc_score, log_loss
+    from sklearn.metrics import (confusion_matrix, f1_score, log_loss,
+                                 roc_auc_score)
     predicted = (p > 0.5).astype(int)
     count = int(np.count_nonzero(predicted != y))
     low, high = wilson(count, len(y))
@@ -106,3 +107,33 @@ def make_figures(out, runs, histories, matrices):
         ax.legend(fontsize=8)
     fig.savefig(out / "learning_curves.pdf")
     plt.close(fig)
+
+def paired_comparison(y, p_a, p_b):
+    """McNemar exact test and 95% CI for the accuracy difference (A - B) on the same test reviews."""
+    from scipy.stats import binomtest
+    ok_a = (p_a > 0.5).astype(int) == y
+    ok_b = (p_b > 0.5).astype(int) == y
+    n = len(y)
+    only_a = int(np.sum(ok_a & ~ok_b))   
+    only_b = int(np.sum(~ok_a & ok_b))   
+    diff = (only_a - only_b) / n
+    se = np.sqrt(max(only_a + only_b - (only_a - only_b) ** 2 / n, 0.0)) / n
+    pval = binomtest(only_a, only_a + only_b, 0.5).pvalue if only_a + only_b else 1.0
+    return dict(a_only_correct=only_a, b_only_correct=only_b, acc_diff=diff,
+                diff_ci_low=diff - 1.959963984540054 * se,
+                diff_ci_high=diff + 1.959963984540054 * se, mcnemar_p=pval)
+
+def paired_comparisons(out):
+    """Compare every pair of saved test predictions and return the results."""
+    from itertools import combinations
+    from pathlib import Path
+    out = Path(out)
+    preds = {f.name.replace("_test_predictions.npz", ""): np.load(f)
+             for f in sorted(out.glob("*_test_predictions.npz"))}
+    rows = []
+    for a, b in combinations(preds, 2):
+        ya, yb = preds[a]["labels"], preds[b]["labels"]
+        assert np.array_equal(ya, yb), "Models were scored on different test labels"
+        rows.append(dict(model_a=a, model_b=b,
+                         **paired_comparison(ya, preds[a]["probabilities"], preds[b]["probabilities"])))
+    return rows

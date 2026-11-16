@@ -7,9 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-
 from model import build_model
-from util import load_training_data, load_test_data, batches, evaluate, make_figures
+from util import (batches, evaluate, load_test_data, load_training_data,
+                  make_figures, paired_comparisons)
 
 CONFIGS = [(arch, setting, rate) for arch in ("GRU", "LSTM")
            for setting, rate in (("A", 0.20), ("B", 0.50))]
@@ -21,7 +21,6 @@ def set_seed(seed):
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
-
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--output-dir", default="results")
@@ -31,7 +30,15 @@ def main():
     p.add_argument("--epochs", type=int, default=300,
                    help="Safety cap; a run hitting it without full patience is rejected")
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--compare-only", action="store_true",
+               help="Skip training; run paired McNemar tests on saved predictions in --output-dir")
     args = p.parse_args()
+
+    if args.compare_only:
+        for r in paired_comparisons(args.output_dir):
+            print(f"{r['model_a']} vs {r['model_b']}: diff={r['acc_diff']:+.4f} "
+                 f"[{r['diff_ci_low']:+.4f}, {r['diff_ci_high']:+.4f}] p={r['mcnemar_p']:.4f}")
+        return
 
     if args.patience < 5 or args.epochs <= args.patience or min(args.batch_size, args.threads) < 1:
         p.error("Require patience >= 5, epochs > patience, and positive batch size and threads.")
@@ -208,6 +215,10 @@ def main():
         histories,
         matrices
     )
+
+    for r in paired_comparisons(out):
+        print(f"{r['model_a']} vs {r['model_b']}: diff={r['acc_diff']:+.4f} "
+            f"[{r['diff_ci_low']:+.4f}, {r['diff_ci_high']:+.4f}] p={r['mcnemar_p']:.4f}", flush=True)
 
     print(
         f"Results saved to {out.resolve()}",
